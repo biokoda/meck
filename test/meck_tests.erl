@@ -950,7 +950,7 @@ stub_all_overridden_by_passthrough_test() ->
 
 mock_file_existing_test() ->
     %% Given
-    ExistingFile = atom_to_list(?MODULE) ++ ".erl",
+    ExistingFile = join("test", ?MODULE, ".erl"),
     {ok, ExistsInfo} = file:read_file_info(ExistingFile),
     meck:new(file, [unstick, passthrough]),
     %% When
@@ -973,7 +973,7 @@ mock_file_missing_test() ->
     meck:unload(file).
 
 cover_test() ->
-    {ok, _} = cover:compile("../test/meck_test_module.erl"),
+    {ok, _} = cover:compile(join("test", "meck_test_module.erl")),
     a = meck_test_module:a(),
     b = meck_test_module:b(),
     {1, 2} = meck_test_module:c(1, 2),
@@ -991,14 +991,14 @@ compile_options_setup() ->
     Module = cover_test_module,
     % Our test module won't compile without compiler options that
     % rebar won't give it, thus the rename dance.
-    Src = join("../test/", Module, ".erl"),
-    ok = file:rename(join("../test/", Module, ".dontcompile"), Src),
+    Src = join("test", Module, ".erl"),
+    ok = file:rename(join("test", Module, ".dontcompile"), Src),
     OldPath = code:get_path(),
-    code:add_path("../test"),
+    code:add_path(test_dir()),
     {OldPath, Src, Module}.
 
 compile_options_teardown({OldPath, Src, Module}) ->
-    file:rename(Src, join("../test/", Module, ".dontcompile")),
+    file:rename(Src, join("test", Module, ".dontcompile")),
     code:purge(Module),
     code:delete(Module),
     code:set_path(OldPath).
@@ -1007,10 +1007,10 @@ cover_options_({_OldPath, Src, Module}) ->
     % Test that compilation options (include paths and preprocessor
     % definitions) are used when un-mecking previously cover compiled
     % modules.
-    CompilerOptions = [{i, "../test/include"}, {d, 'TEST', true}],
+    CompilerOptions = [{i, join("test", "include")}, {d, 'TEST', true}],
     % The option recover feature depends on having the BEAM file
     % available.
-    {ok, _} = compile:file(Src, [{outdir, "../test"}|CompilerOptions]),
+    {ok, _} = compile:file(Src, [{outdir, test_dir()}|CompilerOptions]),
     {ok, _} = cover:compile(Src, CompilerOptions),
     a      = Module:a(),
     b      = Module:b(),
@@ -1025,7 +1025,7 @@ cover_options_({_OldPath, Src, Module}) ->
 -ifdef(cover_empty_compile_opts).
 -define(compile_options, []).
 -else.
--define(compile_options, [{i,"../test/include"},{d,'TEST',true}]).
+-define(compile_options, [{i, join("test", "include")},{d,'TEST',true}]).
 -endif.
 cover_options_fail_({_OldPath, Src, Module}) ->
     %% This may look like the test above but there is a subtle
@@ -1033,8 +1033,8 @@ cover_options_fail_({_OldPath, Src, Module}) ->
     %% compile options.  This test verifies that function `b/0', which
     %% relies on the `TEST' directive being set can still be called
     %% after the module is meck'ed.
-    CompilerOptions = [{i, "../test/include"}, {d, 'TEST', true},
-                       {outdir, "../test"}, debug_info],
+    CompilerOptions = [{i, join("test", "include")}, {d, 'TEST', true},
+                       {outdir, test_dir()}, debug_info],
     {ok, _} = compile:file(Src, CompilerOptions),
     ?assertEqual(CompilerOptions, meck_code:compile_options(Module)),
     {ok, _} = cover:compile_beam(Module),
@@ -1052,8 +1052,6 @@ cover_options_fail_({_OldPath, Src, Module}) ->
     %% Verify passthru calls went to cover
     ?assertEqual({ok, {Module, 4}}, cover:analyze(Module, calls, module)).
 
-join(Path, Module, Ext) -> filename:join(Path, atom_to_list(Module) ++ Ext).
-
 run_mock_no_cover_file(Module) ->
     ok = meck:new(Module),
     ok = meck:expect(Module, a, fun () -> c end),
@@ -1064,14 +1062,14 @@ run_mock_no_cover_file(Module) ->
 %% @doc Verify that passthrough calls _don't_ appear in cover
 %% analysis.
 no_cover_passthrough_test() ->
-    {ok, _} = cover:compile("../test/meck_test_module.erl"),
+    {ok, _} = cover:compile(join("test", "meck_test_module.erl")),
     {ok, {meck_test_module, {0,3}}} = cover:analyze(meck_test_module, module),
     passthrough_test([no_passthrough_cover]),
     {ok, {meck_test_module, {0,3}}} = cover:analyze(meck_test_module, module).
 
 %% @doc Verify that passthrough calls appear in cover analysis.
 cover_passthrough_test() ->
-    {ok, _} = cover:compile("../test/meck_test_module.erl"),
+    {ok, _} = cover:compile(join("test", "meck_test_module.erl")),
     ?assertEqual({ok, {meck_test_module, {0,3}}},
                  cover:analyze(meck_test_module, module)),
     passthrough_test([]),
@@ -1079,7 +1077,7 @@ cover_passthrough_test() ->
                  cover:analyze(meck_test_module, module)).
 
 cover_path_test() ->
-    {ok, _} = cover:compile("../test/meck_test_module.erl"),
+    {ok, _} = cover:compile(join("test", "meck_test_module.erl")),
     ?assertEqual({ok, {meck_test_module, {0,3}}},
                  cover:analyze(meck_test_module, module)),
     ok = meck:new(meck_test_module, [passthrough]),
@@ -1242,7 +1240,7 @@ remote_setup() ->
     Myself = list_to_atom("meck_eunit_test@" ++ Hostname),
     net_kernel:start([Myself, shortnames]),
     {ok, Node} = slave:start_link(list_to_atom(Hostname), meck_remote_test,
-                                  "-pa test"),
+                                  "-pa " ++ test_dir()),
     {Mod, Bin, File} = code:get_object_code(meck),
     true = rpc:call(Node, code, add_path, [filename:dirname(File)]),
     {module, Mod} = rpc:call(Node, code, load_binary, [Mod, File, Bin]),
@@ -1260,7 +1258,7 @@ remote_meck_({Node, Mod}) ->
     ?assertEqual(true, rpc:call(Node, Mod, test, [])).
 
 remote_meck_cover_({Node, Mod}) ->
-    {ok, Mod} = cover:compile(Mod),
+    {ok, Mod} = cover:compile(join(test, Mod, ".erl")),
     {ok, _Nodes} = cover:start([Node]),
     ?assertEqual(ok, rpc:call(Node, meck, new, [Mod])).
 
@@ -1549,6 +1547,33 @@ concurrent_req(Pid, Fun) when is_pid(Pid) ->
     Req = spawn_monitor(Fun),
     wait_message(Pid, Msgs + 1, 100),
     Req.
+
+%% @doc Joins two file name components, recognizing special patterns.
+%%
+%% `Name1' may be a fully or partially qualified directory or an atom. If
+%% `Name1' is 'test' or "test" it is expanded to the working "test" directory.
+%% `Name2' is passed to filename:join/2 unchanged.
+join(test, Name2) ->
+    filename:join(test_dir(), Name2);
+join("test", Name2) ->
+    join(test, Name2);
+join(Name1, Name2) ->
+    filename:join(Name1, Name2).
+
+%% @doc Return the path to the specified file.
+%%
+%% `Path' may be a fully or partially qualified directory or an atom. `Module'
+%% is always an atom, and Ext is always a string, including the `.' prefix. If
+%% `Path' is 'test' or "test" it is expanded to the working "test" directory.
+join(Path, Module, Ext) ->
+    join(Path, atom_to_list(Module) ++ Ext).
+
+%% @doc Return the path to the working "test" directory.
+%%
+%% Rebar handles this entirely differently between v2 and v3, but in both
+%% cases the source and beams end up in the same directory.
+test_dir() ->
+    filename:dirname(code:which(?MODULE)).
 
 %% @doc Wait for a concurrent request started with {@link
 %% concurrent_req/2} to terminate. The return value is the exit reason
